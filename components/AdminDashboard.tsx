@@ -50,6 +50,7 @@ interface AdminDashboardProps {
   products: Product[];
   orders: Order[];
   users: User[];
+  maybeRLSProfiles?: boolean;
   onSaveProduct: (p: Product) => void;
   onDeleteProduct: (id: string) => void; 
   onUpdateOrderStatus: (id: string, status: Order['status']) => void;
@@ -57,7 +58,7 @@ interface AdminDashboardProps {
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
-  products, orders, users, onSaveProduct, onDeleteProduct, onUpdateOrderStatus, onRefresh
+  products, orders, users, maybeRLSProfiles, onSaveProduct, onDeleteProduct, onUpdateOrderStatus, onRefresh
 }) => {
   const [activeTab, setActiveTab] = useState<'sales' | 'products' | 'customers' | 'coupons'>('sales');
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
@@ -554,6 +555,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div>
                 <h2 className="text-2xl font-bold text-[#4A3728]">Lista de Clientes</h2>
                 <p className="text-xs font-bold text-[#8C7A6B] uppercase mt-1">{users.length} usuarios registrados</p>
+                
               </div>
 
               <div className="bg-white rounded-3xl border border-[#EADED2] overflow-hidden shadow-sm">

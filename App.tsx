@@ -47,6 +47,8 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [maybeRLSProfiles, setMaybeRLSProfiles] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -227,7 +229,7 @@ const App: React.FC = () => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMounted) return;
 
-      /* console.log('Auth state changed:', event, session?.user?.email); */
+      console.log('Auth state changed:', event, session?.user?.email);
 
       // El evento INITIAL_SESSION se dispara automáticamente cuando Supabase inicializa
       if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
@@ -243,9 +245,11 @@ const App: React.FC = () => {
         } else {
           setCurrentUser(null);
         }
+        setAuthLoading(false);
       } else if (event === 'SIGNED_OUT') {
         setCurrentUser(null);
         setToast({ message: 'Sesión cerrada correctamente', type: 'success' });
+        setAuthLoading(false);
       }
     });
 
@@ -264,6 +268,7 @@ const App: React.FC = () => {
           // Data loading is handled above, no need to set isLoading here
         }
       }
+      setAuthLoading(false);
     }, 1000);
 
     return () => {
@@ -274,14 +279,30 @@ const App: React.FC = () => {
   }, []);
 
   async function fetchUsers() {
-    const { data: profilesData } = await supabase.from('profiles').select('*');
+    const { data: profilesData, error } = await supabase.from('profiles').select('*');
+    if (error) {
+      console.warn('Error fetching profiles:', error);
+      setUsers([]);
+      setMaybeRLSProfiles(true);
+      return;
+    }
+
     if (profilesData) {
-      setUsers(profilesData.map(p => ({
+      const mapped = profilesData.map(p => ({
         id: p.id,
         name: p.full_name || 'Sin nombre',
         email: '',
         role: p.role || 'customer'
-      })));
+      }));
+      setUsers(mapped);
+
+      // If only a single profile (often the current user) is returned, it's likely due to RLS policies.
+      if (mapped.length <= 1) {
+        console.warn('Only one or zero profiles returned; this may be caused by Supabase RLS policies.');
+        setMaybeRLSProfiles(true);
+      } else {
+        setMaybeRLSProfiles(false);
+      }
     }
   }
 
@@ -464,7 +485,7 @@ const App: React.FC = () => {
   const activeProducts = products.filter(p => p.isActive);
 
   const renderSection = () => {
-    if (isLoading) return (
+    if (isLoading || authLoading) return (
       <div className="h-[60vh] flex flex-col items-center justify-center gap-4">
         <Loader2 className="animate-spin text-[#7C5E47]" size={48} />
         <p className="text-[#4A3728] font-medium animate-pulse">Cargando magia de D'Velis...</p>
@@ -489,6 +510,7 @@ const App: React.FC = () => {
             products={products}
             orders={orders}
             users={users}
+            maybeRLSProfiles={maybeRLSProfiles}
             onSaveProduct={saveProduct}
             onDeleteProduct={(id) => {
               const prod = products.find(p => p.id === id);

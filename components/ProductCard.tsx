@@ -9,12 +9,25 @@ interface ProductCardProps {
 }
 
 const ProductCard: React.FC<ProductCardProps> = ({ product, onAddToCart }) => {
+  const getProductSlug = (name: string) => {
+    return name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  };
+
   const handleShare = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const url = `${window.location.origin}?product=${encodeURIComponent(product.id)}`;
+    const slug = getProductSlug(product.name);
+    const url = `${window.location.origin}/productos/${slug}?product=${encodeURIComponent(product.id)}`;
+    const shortDescription = product.description.length > 160 
+      ? `${product.description.slice(0, 157)}...`
+      : product.description;
     const shareData = {
       title: `D'Velis - ${product.name}`,
-      text: `¡Mira esta vela artesanal de D'Velis! ${product.name}: ${product.description}`,
+      text: `¡Mira esta vela artesanal de D'Velis! ${product.name}: ${shortDescription}`,
       url,
     };
 
@@ -30,11 +43,14 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onAddToCart }) => {
     <div 
       onClick={() => onAddToCart(product)}
       className="group bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg transition-all border border-[#EADED2] cursor-pointer flex flex-col h-full"
+      itemScope
+      itemType="https://schema.org/Product"
     >
       <div className="relative aspect-square overflow-hidden shrink-0">
         <img 
           src={product.images[0]} 
           alt={product.name}
+          itemProp="image"
           className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
           loading="lazy"
         />
@@ -48,16 +64,24 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onAddToCart }) => {
       <div className="p-5 flex flex-col flex-grow">
         <div className="flex justify-between items-start mb-2">
           <h3 className="text-lg font-bold text-[#4A3728] leading-tight group-hover:text-[#7C5E47] transition-colors">
-            {product.name}
+            <span itemProp="name">{product.name}</span>
           </h3>
-          <span className="text-[#7C5E47] font-bold">${product.price.toLocaleString('es-CO')}</span>
+          <span className="text-[#7C5E47] font-bold" itemProp="offers" itemScope itemType="https://schema.org/Offer">
+            <meta itemProp="priceCurrency" content="COP" />
+            <span itemProp="price">
+              {product.price.toLocaleString('es-CO')}
+            </span>
+          </span>
         </div>
         
         {product.weight && (
           <p className="text-[10px] text-[#4A3728] mb-3 font-semibold uppercase tracking-widest">Peso: {product.weight}</p>
         )}
         
-        <p className="text-xs text-[#4A3728] line-clamp-2 mb-4 h-12 leading-relaxed opacity-80 overflow-hidden">
+        <p 
+          className="text-xs text-[#4A3728] line-clamp-2 mb-4 h-12 leading-relaxed opacity-80 overflow-hidden"
+          itemProp="description"
+        >
           {product.description}
         </p>
 

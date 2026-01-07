@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Product, CartItem } from '../types';
 import { ChevronLeft, Minus, Plus, ShoppingBag, Sparkles, Droplets, Palette, ChevronRight, Info, Check, Tag, Box } from 'lucide-react';
 import ProductCard from '../components/ProductCard';
@@ -11,8 +11,8 @@ interface ProductDetailProps {
   onProductClick: (p: Product) => void;
 }
 
-const DEFAULT_COLORS = ['Crema Natural', 'Blanco', 'Miel'];
-const DEFAULT_AROMAS = ['Vainilla Gourmet', 'Canela & Especias', 'Sin Aroma'];
+const DEFAULT_COLORS = ['Blanco'];
+const DEFAULT_AROMAS = [ 'Sin Aroma'];
 const DEFAULT_PRESENTATIONS = ['Presentación Estándar'];
 
 const ProductDetail: React.FC<ProductDetailProps> = ({ product, allProducts, onBack, onAddToCart, onProductClick }) => {
@@ -35,6 +35,74 @@ const ProductDetail: React.FC<ProductDetailProps> = ({ product, allProducts, onB
   const discountPercentage = product.bulkPrice 
     ? Math.round((1 - product.bulkPrice.price / product.price) * 100) 
     : 0;
+
+  // SEO dinámico: actualizar título, meta descripción y etiquetas sociales según el producto
+  useEffect(() => {
+    const previousTitle = document.title;
+    const metaDescription = document.querySelector('meta[name="description"]') as HTMLMetaElement | null;
+    const previousDescription = metaDescription?.getAttribute('content') || '';
+
+    const ogTitle = document.querySelector('meta[property="og:title"]') as HTMLMetaElement | null;
+    const previousOgTitle = ogTitle?.getAttribute('content') || '';
+
+    const ogDescription = document.querySelector('meta[property="og:description"]') as HTMLMetaElement | null;
+    const previousOgDescription = ogDescription?.getAttribute('content') || '';
+
+    const ogUrl = document.querySelector('meta[property="og:url"]') as HTMLMetaElement | null;
+    const previousOgUrl = ogUrl?.getAttribute('content') || '';
+
+    const twitterTitle = document.querySelector('meta[property="twitter:title"]') as HTMLMetaElement | null;
+    const previousTwitterTitle = twitterTitle?.getAttribute('content') || '';
+
+    const twitterDescription = document.querySelector('meta[property="twitter:description"]') as HTMLMetaElement | null;
+    const previousTwitterDescription = twitterDescription?.getAttribute('content') || '';
+
+    const canonicalLink = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+    const previousCanonical = canonicalLink?.href || '';
+
+    const cleanDescription = (product.description || '').trim();
+    const seoDescription = cleanDescription.length > 160 
+      ? `${cleanDescription.slice(0, 157)}...`
+      : cleanDescription || `Vela artesanal personalizada ${product.name} de D'Velis.`;
+
+    const currentUrl = window.location.href;
+
+    document.title = `D'Velis | ${product.name}`;
+    if (metaDescription) metaDescription.content = seoDescription;
+    if (ogTitle) ogTitle.content = `D'Velis | ${product.name}`;
+    if (ogDescription) ogDescription.content = seoDescription;
+    if (ogUrl) ogUrl.content = currentUrl;
+    if (twitterTitle) twitterTitle.content = `D'Velis | ${product.name}`;
+    if (twitterDescription) twitterDescription.content = seoDescription;
+    if (canonicalLink) canonicalLink.href = currentUrl;
+
+    return () => {
+      document.title = previousTitle;
+      if (metaDescription) metaDescription.content = previousDescription;
+      if (ogTitle) ogTitle.content = previousOgTitle;
+      if (ogDescription) ogDescription.content = previousOgDescription;
+      if (ogUrl) ogUrl.content = previousOgUrl;
+      if (twitterTitle) twitterTitle.content = previousTwitterTitle;
+      if (twitterDescription) twitterDescription.content = previousTwitterDescription;
+      if (canonicalLink) canonicalLink.href = previousCanonical;
+    };
+  }, [product]);
+
+  const productStructuredData = {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: product.name,
+    description: product.description,
+    image: product.images,
+    sku: product.id,
+    category: product.category,
+    offers: {
+      '@type': 'Offer',
+      priceCurrency: 'COP',
+      price: unitPrice,
+      availability: 'https://schema.org/InStock',
+    },
+  };
 
   // Lógica para productos relacionados
   const relatedProducts = useMemo(() => {
@@ -324,6 +392,10 @@ const ProductDetail: React.FC<ProductDetailProps> = ({ product, allProducts, onB
           animation: bounce-short 1s ease-in-out infinite;
         }
       `}} />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(productStructuredData) }}
+      />
     </div>
   );
 };

@@ -19,6 +19,16 @@ const ProductDetail = React.lazy(() => import('./pages/ProductDetail'));
 
 const CART_STORAGE_KEY = 'dvelis_shopping_cart_v2';
 
+// Utilidad simple para generar un "slug" SEO a partir del nombre del producto
+const getProductSlug = (name: string) => {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // quitar tildes
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+};
+
 const App: React.FC = () => {
   const [activeView, setActiveView] = useState<AppView>('home');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -612,9 +622,22 @@ const App: React.FC = () => {
 
     const params = new URLSearchParams(window.location.search);
     const productId = params.get('product');
-    if (!productId) return;
+    let product: Product | undefined;
 
-    const product = products.find(p => p.id === productId);
+    if (productId) {
+      product = products.find(p => p.id === productId);
+    } else {
+      // Soporte para URLs SEO tipo /productos/slug
+      const pathname = window.location.pathname || '';
+      const segments = pathname.split('/').filter(Boolean);
+      const maybeSlug = segments[0] === 'productos' ? segments[1] : null;
+
+      if (maybeSlug) {
+        const normalizedSlug = maybeSlug.toLowerCase();
+        product = products.find(p => getProductSlug(p.name) === normalizedSlug);
+      }
+    }
+
     if (!product) return;
 
     initialProductHandledRef.current = true;
@@ -632,11 +655,31 @@ const App: React.FC = () => {
 
     switch (activeView) {
       case 'home':
-        return <Home products={activeProducts} onExplore={(c) => { setSelectedCategory(c || Category.ALL); setActiveView('catalog'); }} onProductClick={(p) => { setSelectedProduct(p); setActiveView('product-detail'); }} />;
+        return <Home 
+          products={activeProducts} 
+          onExplore={(c) => { 
+            setSelectedCategory(c || Category.ALL); 
+            setActiveView('catalog'); 
+            window.history.pushState({}, '', '/catalogo');
+          }} 
+          onProductClick={(p) => { 
+            setSelectedProduct(p); 
+            setActiveView('product-detail'); 
+            const slug = getProductSlug(p.name);
+            const url = `/productos/${slug}?product=${encodeURIComponent(p.id)}`;
+            window.history.pushState({}, '', url);
+          }} 
+        />;
       case 'catalog':
         return <Catalog 
           products={activeProducts}
-          onAddToCart={(p) => { setSelectedProduct(p); setActiveView('product-detail'); }} 
+          onAddToCart={(p) => { 
+            setSelectedProduct(p); 
+            setActiveView('product-detail'); 
+            const slug = getProductSlug(p.name);
+            const url = `/productos/${slug}?product=${encodeURIComponent(p.id)}`;
+            window.history.pushState({}, '', url);
+          }} 
           searchQuery={searchQuery} 
           onClearSearch={handleClearSearch}
           initialCategory={selectedCategory} 
@@ -665,15 +708,38 @@ const App: React.FC = () => {
               }
             }}
           />
-        ) : <Home products={activeProducts} onExplore={() => setActiveView('catalog')} onProductClick={(p) => { setSelectedProduct(p); setActiveView('product-detail'); }} />;
+        ) : <Home 
+            products={activeProducts} 
+            onExplore={() => { 
+              setActiveView('catalog'); 
+              window.history.pushState({}, '', '/catalogo');
+            }} 
+            onProductClick={(p) => { 
+              setSelectedProduct(p); 
+              setActiveView('product-detail'); 
+              const slug = getProductSlug(p.name);
+              const url = `/productos/${slug}?product=${encodeURIComponent(p.id)}`;
+              window.history.pushState({}, '', url);
+            }} 
+          />;
       case 'product-detail':
         return selectedProduct ? (
           <ProductDetail 
             product={selectedProduct} 
             allProducts={activeProducts}
-            onBack={() => setActiveView('catalog')} 
+            onBack={() => { 
+              setActiveView('catalog'); 
+              window.history.pushState({}, '', '/catalogo');
+            }} 
             onAddToCart={onAddToCart} 
-            onProductClick={(p) => { setSelectedProduct(p); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onProductClick={(p) => { 
+              setSelectedProduct(p); 
+              setActiveView('product-detail'); 
+              const slug = getProductSlug(p.name);
+              const url = `/productos/${slug}?product=${encodeURIComponent(p.id)}`;
+              window.history.pushState({}, '', url);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
           />
         ) : null;
       case 'about':
@@ -681,7 +747,20 @@ const App: React.FC = () => {
       case 'contact':
         return <Contact />;
       default:
-        return <Home products={activeProducts} onExplore={() => setActiveView('catalog')} onProductClick={(p) => { setSelectedProduct(p); setActiveView('product-detail'); }} />;
+        return <Home 
+          products={activeProducts} 
+          onExplore={() => { 
+            setActiveView('catalog'); 
+            window.history.pushState({}, '', '/catalogo');
+          }} 
+          onProductClick={(p) => { 
+            setSelectedProduct(p); 
+            setActiveView('product-detail'); 
+            const slug = getProductSlug(p.name);
+            const url = `/productos/${slug}?product=${encodeURIComponent(p.id)}`;
+            window.history.pushState({}, '', url);
+          }} 
+        />;
     }
   };
 

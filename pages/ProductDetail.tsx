@@ -60,18 +60,58 @@ const ProductDetail: React.FC<ProductDetailProps> = ({ product, allProducts, onB
     const canonicalLink = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
     const previousCanonical = canonicalLink?.href || '';
 
+    const keywordsText = product.keywords?.length ? product.keywords.join(', ') : '';
     const cleanDescription = (product.description || '').trim();
-    const seoDescription = cleanDescription.length > 160 
-      ? `${cleanDescription.slice(0, 157)}...`
-      : cleanDescription || `Vela artesanal personalizada ${product.name} de D'Velis.`;
+    const descriptionWithKeywords = keywordsText 
+      ? `${cleanDescription} ${keywordsText}`.trim()
+      : cleanDescription;
+    const seoDescription = descriptionWithKeywords.length > 160 
+      ? `${descriptionWithKeywords.slice(0, 157)}...`
+      : descriptionWithKeywords || `Vela artesanal personalizada ${product.name} de D'Velis.`;
 
     const currentUrl = window.location.href;
+    
+    const metaKeywords = document.querySelector('meta[name="keywords"]') as HTMLMetaElement | null;
+    const previousKeywords = metaKeywords?.getAttribute('content') || '';
 
     document.title = `D'Velis | ${product.name}`;
     if (metaDescription) metaDescription.content = seoDescription;
+    if (metaKeywords) {
+      metaKeywords.content = keywordsText || `velas artesanales, ${product.name}, ${product.category}`;
+    } else {
+      const newMetaKeywords = document.createElement('meta');
+      newMetaKeywords.name = 'keywords';
+      newMetaKeywords.content = keywordsText || `velas artesanales, ${product.name}, ${product.category}`;
+      document.head.appendChild(newMetaKeywords);
+    }
     if (ogTitle) ogTitle.content = `D'Velis | ${product.name}`;
     if (ogDescription) ogDescription.content = seoDescription;
     if (ogUrl) ogUrl.content = currentUrl;
+    
+    // Meta tag para imagen de Open Graph
+    const ogImage = document.querySelector('meta[property="og:image"]') as HTMLMetaElement | null;
+    const previousOgImage = ogImage?.getAttribute('content') || '';
+    if (ogImage) {
+      ogImage.content = product.images[0] || '';
+    } else {
+      const newOgImage = document.createElement('meta');
+      newOgImage.setAttribute('property', 'og:image');
+      newOgImage.content = product.images[0] || '';
+      document.head.appendChild(newOgImage);
+    }
+    
+    // Meta tag para imagen de Twitter
+    const twitterImage = document.querySelector('meta[property="twitter:image"]') as HTMLMetaElement | null;
+    const previousTwitterImage = twitterImage?.getAttribute('content') || '';
+    if (twitterImage) {
+      twitterImage.content = product.images[0] || '';
+    } else {
+      const newTwitterImage = document.createElement('meta');
+      newTwitterImage.setAttribute('property', 'twitter:image');
+      newTwitterImage.content = product.images[0] || '';
+      document.head.appendChild(newTwitterImage);
+    }
+    
     if (twitterTitle) twitterTitle.content = `D'Velis | ${product.name}`;
     if (twitterDescription) twitterDescription.content = seoDescription;
     if (canonicalLink) canonicalLink.href = currentUrl;
@@ -79,9 +119,14 @@ const ProductDetail: React.FC<ProductDetailProps> = ({ product, allProducts, onB
     return () => {
       document.title = previousTitle;
       if (metaDescription) metaDescription.content = previousDescription;
+      if (metaKeywords) metaKeywords.content = previousKeywords;
       if (ogTitle) ogTitle.content = previousOgTitle;
       if (ogDescription) ogDescription.content = previousOgDescription;
       if (ogUrl) ogUrl.content = previousOgUrl;
+      const ogImage = document.querySelector('meta[property="og:image"]') as HTMLMetaElement | null;
+      if (ogImage && previousOgImage) ogImage.content = previousOgImage;
+      const twitterImage = document.querySelector('meta[property="twitter:image"]') as HTMLMetaElement | null;
+      if (twitterImage && previousTwitterImage) twitterImage.content = previousTwitterImage;
       if (twitterTitle) twitterTitle.content = previousTwitterTitle;
       if (twitterDescription) twitterDescription.content = previousTwitterDescription;
       if (canonicalLink) canonicalLink.href = previousCanonical;
@@ -92,10 +137,11 @@ const ProductDetail: React.FC<ProductDetailProps> = ({ product, allProducts, onB
     '@context': 'https://schema.org',
     '@type': 'Product',
     name: product.name,
-    description: product.description,
-    image: product.images,
+    description: product.description + product.keywords?.join(', ') || '',
+    image: product.images[0] || '',
     sku: product.id,
     category: product.category,
+    keywords: product.keywords?.join(', ') || '',
     offers: {
       '@type': 'Offer',
       priceCurrency: 'COP',

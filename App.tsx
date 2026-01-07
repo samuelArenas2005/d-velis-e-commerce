@@ -18,6 +18,7 @@ const Contact = React.lazy(() => import('./pages/Contact'));
 const ProductDetail = React.lazy(() => import('./pages/ProductDetail'));
 
 const CART_STORAGE_KEY = 'dvelis_shopping_cart_v2';
+const WELCOME_TOAST_KEY = 'dvelis_welcome_shown';
 
 // Utilidad simple para generar un "slug" SEO a partir del nombre del producto
 const getProductSlug = (name: string) => {
@@ -38,7 +39,7 @@ const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<Category>(Category.ALL);
-  
+
   const [cartItems, setCartItems] = useState<CartItem[]>(() => {
     const saved = localStorage.getItem(CART_STORAGE_KEY);
     if (saved) {
@@ -55,28 +56,33 @@ const App: React.FC = () => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
-  
+  const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
+
   const [maybeRLSProfiles, setMaybeRLSProfiles] = useState(false);
-  const [authLoading, setAuthLoading] = useState(true);
-  
+
   // Refs para evitar ejecuciones duplicadas
   const dataFetchRef = useRef(false);
   const loadUserRef = useRef<string | null>(null);
   const initialProductHandledRef = useRef(false);
+  const currentUserRef = useRef<User | null>(null);
 
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [activeView]);
 
+  // Mantener el ref sincronizado con el estado currentUser
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
+
   // Manejar callback de OAuth: limpiar URL después del redirect
   useEffect(() => {
     const hash = window.location.hash;
     const searchParams = new URLSearchParams(window.location.search);
-    
+
     // Solo limpiar si hay parámetros de OAuth
     const hasAuthParams = hash && (
-      hash.includes('access_token') || 
+      hash.includes('access_token') ||
       hash.includes('error') ||
       searchParams.has('code') ||
       searchParams.has('access_token')
@@ -101,18 +107,19 @@ const App: React.FC = () => {
   // Función para cargar el perfil del usuario desde la sesión
   const loadUserFromSession = async (session: any) => {
     const userId = session?.user?.id;
-    
+
     // Evitar cargar el mismo usuario múltiples veces simultáneamente
     if (loadUserRef.current === userId) {
       // console.log('⏭️ Skipping duplicate loadUserFromSession for user:', session.user.email);
       return;
     }
-    
+
     loadUserRef.current = userId;
     // console.log('👤 loadUserFromSession called for:', session.user.email);
-    
+
     if (!session?.user) {
       // console.warn('⚠️ No user in session');
+      currentUserRef.current = null;
       setCurrentUser(null);
       loadUserRef.current = null;
       return;
@@ -125,13 +132,13 @@ const App: React.FC = () => {
         const normalized = String(profileRole).toLowerCase().trim();
         if (normalized === 'admin') return 'admin';
       }
-      
+
       // Intentar desde los metadatos del usuario (app_metadata o user_metadata)
       if (userMetadata?.role) {
         const normalized = String(userMetadata.role).toLowerCase().trim();
         if (normalized === 'admin') return 'admin';
       }
-      
+
       // Por defecto customer
       return 'customer';
     };
@@ -149,16 +156,16 @@ const App: React.FC = () => {
           .select('*')
           .eq('id', session.user.id)
           .single();
-        
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Profile fetch timeout after 2 seconds')), 2000)
+
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Profile fetch timeout after 500ms')), 500)
         );
-        
+
         const result = await Promise.race([profilePromise, timeoutPromise]) as any;
-        
+
         profile = result.data;
         profileError = result.error;
-        
+
         if (profileError) {
           // console.warn('⚠️ Profile query returned error:', profileError);
         } else if (profile) {
@@ -184,45 +191,59 @@ const App: React.FC = () => {
       if (profile) {
         // Perfil encontrado exitosamente
         // console.log('✅ Profile found, processing...');
-        const normalizedRole = typeof profile.role === 'string' 
-          ? profile.role.toLowerCase().trim() 
+        const normalizedRole = typeof profile.role === 'string'
+          ? profile.role.toLowerCase().trim()
           : String(profile.role || '').toLowerCase().trim();
         const userRole = normalizedRole === 'admin' ? 'admin' : 'customer';
-        
+
         const userData = {
           id: profile.id,
           name: profile.full_name || session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Usuario',
           email: session.user.email || '',
           role: userRole
         };
-        
+
         // console.log('✅ Setting currentUser from profile:', { email: userData.email, role: userData.role });
+        currentUserRef.current = userData;
         setCurrentUser(userData);
         // console.log('✅ loadUserFromSession completed (profile)');
         loadUserRef.current = null;
         return;
       }
 
-      // Si hay error RLS o no se encontró perfil, usar datos de la sesión
+      // IMPORTANTE: Si hay error RLS o timeout, NO sobreescribir el rol de admin si ya existe
+      // Solo ejecutar fallback si realmente no hay usuario cargado o si el usuario actual no es admin
+      const currentUserInMemory = currentUserRef.current;
+      const isCurrentUserAdmin = currentUserInMemory?.role === 'admin' && currentUserInMemory?.id === session.user.id;
+
+      // Si ya tenemos un admin cargado y la consulta falló temporalmente, preservar el estado
+      if (isCurrentUserAdmin) {
+        // console.log('⚠️ Profile fetch failed but preserving admin role for existing user');
+        loadUserRef.current = null;
+        return; // No hacer nada, mantener el usuario admin actual
+      }
+
+      // Si no hay usuario en memoria o no es admin, usar datos de la sesión como fallback
       // console.log('⚠️ No profile found, using session metadata as fallback');
-      
+
       // Intentar determinar rol desde metadatos de la sesión
       const userRole = determineRole(
-        undefined, 
+        undefined,
         { ...session.user.user_metadata, ...session.user.app_metadata }
       );
 
       const userData = {
         id: session.user.id,
-        name: session.user.user_metadata?.full_name || 
-              session.user.user_metadata?.name || 
-              session.user.email?.split('@')[0] || 
-              'Usuario',
+        name: session.user.user_metadata?.full_name ||
+          session.user.user_metadata?.name ||
+          session.user.email?.split('@')[0] ||
+          'Usuario',
         email: session.user.email || '',
         role: userRole
       };
 
       // console.log('✅ Setting currentUser from session metadata:', { email: userData.email, role: userData.role });
+      currentUserRef.current = userData;
       setCurrentUser(userData);
       // console.log('✅ loadUserFromSession completed (session metadata)');
       loadUserRef.current = null;
@@ -230,20 +251,32 @@ const App: React.FC = () => {
 
     } catch (error) {
       // console.error('❌ Unexpected error in loadUserFromSession:', error);
-      // Último fallback: usar datos básicos de la sesión
+
+      // IMPORTANTE: Preservar el rol de admin si ya existe en memoria
+      const currentUserInMemory = currentUserRef.current;
+      const isCurrentUserAdmin = currentUserInMemory?.role === 'admin' && currentUserInMemory?.id === session.user.id;
+
+      if (isCurrentUserAdmin) {
+        // console.log('⚠️ Critical error but preserving admin role for existing user');
+        loadUserRef.current = null;
+        return; // Mantener el usuario admin actual
+      }
+
+      // Último fallback: usar datos básicos de la sesión solo si no hay usuario admin
       const userRole = determineRole(
         undefined,
         { ...session.user.user_metadata, ...session.user.app_metadata }
       );
-      
+
       const fallbackUser = {
         id: session.user.id,
         name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Usuario',
         email: session.user.email || '',
         role: userRole
       };
-      
+
       // console.log('✅ Setting currentUser from error fallback:', { email: fallbackUser.email, role: fallbackUser.role });
+      currentUserRef.current = fallbackUser;
       setCurrentUser(fallbackUser);
       // console.log('✅ loadUserFromSession completed (error fallback)');
       loadUserRef.current = null;
@@ -267,8 +300,8 @@ const App: React.FC = () => {
 
         if (error) {
           // console.error('❌ Error getting session:', error);
+          currentUserRef.current = null;
           setCurrentUser(null);
-          setAuthLoading(false);
           return;
         }
 
@@ -278,7 +311,7 @@ const App: React.FC = () => {
           //   expiresAt: session.expires_at,
           //   origin: window.location.origin
           // });
-          
+
           hasProcessedInitialSession = true;
           try {
             await loadUserFromSession(session);
@@ -288,35 +321,18 @@ const App: React.FC = () => {
           }
         } else {
           // console.log('⚠️ No session found on init, origin:', window.location.origin);
+          currentUserRef.current = null;
           setCurrentUser(null);
         }
       } catch (err) {
         // console.error('❌ Unexpected error in initAuth:', err);
+        currentUserRef.current = null;
         setCurrentUser(null);
-      } finally {
-        if (mounted) {
-          // console.log('✅ Auth loading complete');
-          setAuthLoading(false);
-        } else {
-          // console.log('⚠️ Component unmounted before completing auth');
-        }
       }
     };
 
     // Ejecutar inmediatamente
     initAuth();
-
-    // Timeout de seguridad: asegurar que authLoading se establezca en false después de 3 segundos máximo
-    const safetyTimeout = setTimeout(() => {
-      if (mounted) {
-        setAuthLoading((prev) => {
-          if (prev) {
-            // console.warn('⚠️ Auth initialization timeout after 3s, forcing authLoading to false');
-          }
-          return false;
-        });
-      }
-    }, 3000);
 
     // 2️⃣ Escuchar cambios (login/logout reales, no para carga inicial)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -328,10 +344,24 @@ const App: React.FC = () => {
         return;
       }
 
+      // Ignorar TOKEN_REFRESHED si es el mismo usuario admin ya cargado
+      // Esto evita recargas innecesarias al cambiar de pestaña
+      if (event === 'TOKEN_REFRESHED' && session) {
+        const currentUserInMemory = currentUserRef.current;
+        const isSameAdminUser = currentUserInMemory?.role === 'admin' &&
+          currentUserInMemory?.id === session.user.id;
+
+        if (isSameAdminUser) {
+          // console.log('⏭️ Skipping TOKEN_REFRESHED (same admin user already loaded)');
+          return; // No recargar, preservar el estado actual
+        }
+      }
+
       // console.log('🔔 Auth state changed:', event, session?.user?.email);
 
       if (session) {
-        // Cualquier evento con sesión (SIGNED_IN, TOKEN_REFRESHED, etc.)
+        // Solo procesar eventos que indican cambios reales
+        // TOKEN_REFRESHED solo se procesa si no es el mismo admin (ya filtrado arriba)
         try {
           // console.log('🔄 Loading user from session (onAuthStateChange)...');
           await loadUserFromSession(session);
@@ -340,16 +370,24 @@ const App: React.FC = () => {
           // console.error('❌ Error loading user in onAuthStateChange:', loadError);
           // No bloquear, continuar aunque falle
         }
-        
-        // Solo mostrar toast en login nuevo
+
+        // Solo mostrar toast en login nuevo (no en refrescos de token)
         if (event === 'SIGNED_IN') {
           setIsLoginOpen(false);
-          setToast({ message: '¡Bienvenido! Sesión iniciada correctamente', type: 'success' });
+          // Solo mostrar el toast de bienvenida si no se ha mostrado en esta sesión
+          const hasShownWelcome = localStorage.getItem(WELCOME_TOAST_KEY);
+          if (!hasShownWelcome) {
+            setToast({ message: '¡Bienvenido! Sesión iniciada correctamente', type: 'success' });
+            localStorage.setItem(WELCOME_TOAST_KEY, 'true');
+          }
         }
       } else {
         // Sin sesión = logout
         // console.log('🚪 No session, setting user to null');
+        currentUserRef.current = null;
         setCurrentUser(null);
+        // Limpiar el flag de bienvenida al cerrar sesión
+        localStorage.removeItem(WELCOME_TOAST_KEY);
         if (event === 'SIGNED_OUT') {
           setToast({ message: 'Sesión cerrada correctamente', type: 'success' });
         }
@@ -358,7 +396,6 @@ const App: React.FC = () => {
 
     return () => {
       mounted = false;
-      clearTimeout(safetyTimeout);
       subscription.unsubscribe();
     };
   }, []);
@@ -394,7 +431,7 @@ const App: React.FC = () => {
   async function fetchInitialData() {
     // console.log('📦 Fetching initial data...');
     setIsLoading(true);
-    
+
     try {
       // Cargar productos
       // console.log('📦 Loading products...');
@@ -402,7 +439,7 @@ const App: React.FC = () => {
         .from('products')
         .select('*')
         .order('created_at', { ascending: false });
-      
+
       if (productsError) {
         // console.error('❌ Error loading products:', productsError);
         // Continuar aunque falle, usar array vacío
@@ -433,7 +470,7 @@ const App: React.FC = () => {
           .from('orders')
           .select('*')
           .order('created_at', { ascending: false });
-        
+
         if (ordersError) {
           // console.warn('⚠️ Error loading orders (may be RLS):', ordersError);
           setOrders([]);
@@ -527,7 +564,7 @@ const App: React.FC = () => {
 
     try {
       const { error } = await supabase.from('products').update({ is_active: newStatus }).eq('id', id);
-      
+
       if (error) {
         showToast('Error al cambiar estado', 'error');
         fetchInitialData();
@@ -542,8 +579,11 @@ const App: React.FC = () => {
 
   const logout = async () => {
     await supabase.auth.signOut();
+    currentUserRef.current = null;
     setCurrentUser(null);
     setActiveView('home');
+    // Limpiar el flag de bienvenida al cerrar sesión
+    localStorage.removeItem(WELCOME_TOAST_KEY);
     showToast('Sesión cerrada correctamente');
   };
 
@@ -560,9 +600,9 @@ const App: React.FC = () => {
 
   const onAddToCart = (item: CartItem) => {
     setCartItems(prev => {
-      const existingIndex = prev.findIndex(i => 
-        i.id === item.id && 
-        i.selectedColor === item.selectedColor && 
+      const existingIndex = prev.findIndex(i =>
+        i.id === item.id &&
+        i.selectedColor === item.selectedColor &&
         i.selectedAroma === item.selectedAroma &&
         i.selectedPresentation === item.selectedPresentation
       );
@@ -570,7 +610,7 @@ const App: React.FC = () => {
       if (existingIndex > -1) {
         const next = [...prev];
         const newQty = next[existingIndex].quantity + item.quantity;
-        
+
         let unitPrice = next[existingIndex].price;
         if (next[existingIndex].bulkPrice && newQty >= next[existingIndex].bulkPrice.threshold) {
           unitPrice = next[existingIndex].bulkPrice.price;
@@ -646,48 +686,41 @@ const App: React.FC = () => {
   }, [products]);
 
   const renderSection = () => {
-    if (authLoading) return (
-      <div className="h-[60vh] flex flex-col items-center justify-center gap-4">
-        <Loader2 className="animate-spin text-[#7C5E47]" size={48} />
-        <p className="text-[#4A3728] font-medium animate-pulse">Cargando magia de D'Velis...</p>
-      </div>
-    );
-
     switch (activeView) {
       case 'home':
-        return <Home 
-          products={activeProducts} 
-          onExplore={(c) => { 
-            setSelectedCategory(c || Category.ALL); 
-            setActiveView('catalog'); 
+        return <Home
+          products={activeProducts}
+          onExplore={(c) => {
+            setSelectedCategory(c || Category.ALL);
+            setActiveView('catalog');
             window.history.pushState({}, '', '/catalogo');
-          }} 
-          onProductClick={(p) => { 
-            setSelectedProduct(p); 
-            setActiveView('product-detail'); 
+          }}
+          onProductClick={(p) => {
+            setSelectedProduct(p);
+            setActiveView('product-detail');
             const slug = getProductSlug(p.name);
             const url = `/productos/${slug}?product=${encodeURIComponent(p.id)}`;
             window.history.pushState({}, '', url);
-          }} 
+          }}
         />;
       case 'catalog':
-        return <Catalog 
+        return <Catalog
           products={activeProducts}
-          onAddToCart={(p) => { 
-            setSelectedProduct(p); 
-            setActiveView('product-detail'); 
+          onAddToCart={(p) => {
+            setSelectedProduct(p);
+            setActiveView('product-detail');
             const slug = getProductSlug(p.name);
             const url = `/productos/${slug}?product=${encodeURIComponent(p.id)}`;
             window.history.pushState({}, '', url);
-          }} 
-          searchQuery={searchQuery} 
+          }}
+          searchQuery={searchQuery}
           onClearSearch={handleClearSearch}
-          initialCategory={selectedCategory} 
+          initialCategory={selectedCategory}
         />;
       case 'admin':
         const adminRole = currentUser?.role ? String(currentUser.role).toLowerCase().trim() : '';
         return adminRole === 'admin' ? (
-          <AdminDashboard 
+          <AdminDashboard
             products={products}
             orders={orders}
             users={users}
@@ -708,33 +741,33 @@ const App: React.FC = () => {
               }
             }}
           />
-        ) : <Home 
-            products={activeProducts} 
-            onExplore={() => { 
-              setActiveView('catalog'); 
-              window.history.pushState({}, '', '/catalogo');
-            }} 
-            onProductClick={(p) => { 
-              setSelectedProduct(p); 
-              setActiveView('product-detail'); 
-              const slug = getProductSlug(p.name);
-              const url = `/productos/${slug}?product=${encodeURIComponent(p.id)}`;
-              window.history.pushState({}, '', url);
-            }} 
-          />;
+        ) : <Home
+          products={activeProducts}
+          onExplore={() => {
+            setActiveView('catalog');
+            window.history.pushState({}, '', '/catalogo');
+          }}
+          onProductClick={(p) => {
+            setSelectedProduct(p);
+            setActiveView('product-detail');
+            const slug = getProductSlug(p.name);
+            const url = `/productos/${slug}?product=${encodeURIComponent(p.id)}`;
+            window.history.pushState({}, '', url);
+          }}
+        />;
       case 'product-detail':
         return selectedProduct ? (
-          <ProductDetail 
-            product={selectedProduct} 
+          <ProductDetail
+            product={selectedProduct}
             allProducts={activeProducts}
-            onBack={() => { 
-              setActiveView('catalog'); 
+            onBack={() => {
+              setActiveView('catalog');
               window.history.pushState({}, '', '/catalogo');
-            }} 
-            onAddToCart={onAddToCart} 
-            onProductClick={(p) => { 
-              setSelectedProduct(p); 
-              setActiveView('product-detail'); 
+            }}
+            onAddToCart={onAddToCart}
+            onProductClick={(p) => {
+              setSelectedProduct(p);
+              setActiveView('product-detail');
               const slug = getProductSlug(p.name);
               const url = `/productos/${slug}?product=${encodeURIComponent(p.id)}`;
               window.history.pushState({}, '', url);
@@ -747,26 +780,26 @@ const App: React.FC = () => {
       case 'contact':
         return <Contact />;
       default:
-        return <Home 
-          products={activeProducts} 
-          onExplore={() => { 
-            setActiveView('catalog'); 
+        return <Home
+          products={activeProducts}
+          onExplore={() => {
+            setActiveView('catalog');
             window.history.pushState({}, '', '/catalogo');
-          }} 
-          onProductClick={(p) => { 
-            setSelectedProduct(p); 
-            setActiveView('product-detail'); 
+          }}
+          onProductClick={(p) => {
+            setSelectedProduct(p);
+            setActiveView('product-detail');
             const slug = getProductSlug(p.name);
             const url = `/productos/${slug}?product=${encodeURIComponent(p.id)}`;
             window.history.pushState({}, '', url);
-          }} 
+          }}
         />;
     }
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FDFBF9]">
-      <HeaderComp 
+      <HeaderComp
         user={currentUser}
         cartCount={cartItems.reduce((acc, item) => acc + item.quantity, 0)}
         onCartClick={() => setIsCartOpen(true)}
@@ -831,7 +864,7 @@ const App: React.FC = () => {
         </div>
       </footer>
 
-      <Cart 
+      <Cart
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
         items={cartItems}
@@ -841,12 +874,12 @@ const App: React.FC = () => {
       />
 
       {isLoginOpen && <LoginOverlay onClose={() => setIsLoginOpen(false)} onShowToast={showToast} />}
-      
+
       {toast && (
-        <Toast 
-          message={toast.message} 
-          type={toast.type} 
-          onClose={() => setToast(null)} 
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
         />
       )}
 
@@ -854,9 +887,9 @@ const App: React.FC = () => {
         // Normalizar el rol para la comparación (case-insensitive)
         const userRole = currentUser?.role ? String(currentUser.role).toLowerCase().trim() : '';
         const isAdmin = userRole === 'admin';
-        
+
         return isAdmin ? (
-          <AdminFloatingAccess 
+          <AdminFloatingAccess
             activeView={activeView}
             onNavigate={setActiveView}
             pendingOrdersCount={orders.filter(o => o.status === 'pending').length}
@@ -867,34 +900,34 @@ const App: React.FC = () => {
       {isSearchOpen && (
         <div className="fixed inset-0 z-[150] bg-[#FDFBF9] flex flex-col animate-fade-in sm:px-12">
           <div className="flex items-center justify-between h-20 px-6 border-b border-[#EADED2]">
-             <button onClick={() => setIsSearchOpen(false)} className="md:hidden flex items-center gap-2 text-[#7C5E47] font-bold text-xs uppercase">
-               <ArrowLeft size={20} /> Volver
-             </button>
-             <h2 className="hidden md:block font-serif italic text-2xl text-[#4A3728]">Buscador D'Velis</h2>
-             <button onClick={() => setIsSearchOpen(false)} className="p-2 hover:bg-[#F3EFEA] rounded-full transition-colors">
-               <X size={28} />
-             </button>
+            <button onClick={() => setIsSearchOpen(false)} className="md:hidden flex items-center gap-2 text-[#7C5E47] font-bold text-xs uppercase">
+              <ArrowLeft size={20} /> Volver
+            </button>
+            <h2 className="hidden md:block font-serif italic text-2xl text-[#4A3728]">Buscador D'Velis</h2>
+            <button onClick={() => setIsSearchOpen(false)} className="p-2 hover:bg-[#F3EFEA] rounded-full transition-colors">
+              <X size={28} />
+            </button>
           </div>
-          
+
           <div className="flex-1 flex flex-col items-center justify-center px-6 max-w-4xl mx-auto w-full">
             <div className="w-full relative group">
               <Search className="absolute left-0 top-1/2 -translate-y-1/2 text-[#7C5E47]" size={32} />
-              <input 
+              <input
                 autoFocus
-                type="text" 
+                type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Escribe el nombre de una vela..."
                 className="w-full bg-transparent border-b-2 border-[#EADED2] focus:border-[#7C5E47] py-6 pl-12 pr-12 text-2xl md:text-5xl outline-none font-serif italic transition-all"
-                onKeyDown={(e) => { 
-                  if (e.key === 'Enter') { 
-                    setIsSearchOpen(false); 
-                    setActiveView('catalog'); 
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    setIsSearchOpen(false);
+                    setActiveView('catalog');
                   }
                 }}
               />
               {searchQuery.length > 0 && (
-                <button 
+                <button
                   onClick={handleClearSearch}
                   className="absolute right-0 top-1/2 -translate-y-1/2 p-2 text-[#A68972] hover:text-[#7C5E47]"
                 >
@@ -903,12 +936,12 @@ const App: React.FC = () => {
               )}
             </div>
             <div className="mt-8 text-center space-y-4">
-               <p className="text-[#4A3728] text-sm font-medium">Pulsa "Enter" para ver todos los resultados</p>
-               <div className="flex flex-wrap justify-center gap-2">
-                 <button onClick={() => { setSearchQuery('Burbuja'); setIsSearchOpen(false); setActiveView('catalog'); }} className="px-3 py-1 bg-[#F3EFEA] rounded-full text-[10px] font-bold text-[#7C5E47] uppercase">#Burbuja</button>
-                 <button onClick={() => { setSearchQuery('Navidad'); setIsSearchOpen(false); setActiveView('catalog'); }} className="px-3 py-1 bg-[#F3EFEA] rounded-full text-[10px] font-bold text-[#7C5E47] uppercase">#Navidad</button>
-                 <button onClick={() => { setSearchQuery('Oso'); setIsSearchOpen(false); setActiveView('catalog'); }} className="px-3 py-1 bg-[#F3EFEA] rounded-full text-[10px] font-bold text-[#7C5E47] uppercase">#Oso</button>
-               </div>
+              <p className="text-[#4A3728] text-sm font-medium">Pulsa "Enter" para ver todos los resultados</p>
+              <div className="flex flex-wrap justify-center gap-2">
+                <button onClick={() => { setSearchQuery('Burbuja'); setIsSearchOpen(false); setActiveView('catalog'); }} className="px-3 py-1 bg-[#F3EFEA] rounded-full text-[10px] font-bold text-[#7C5E47] uppercase">#Burbuja</button>
+                <button onClick={() => { setSearchQuery('Navidad'); setIsSearchOpen(false); setActiveView('catalog'); }} className="px-3 py-1 bg-[#F3EFEA] rounded-full text-[10px] font-bold text-[#7C5E47] uppercase">#Navidad</button>
+                <button onClick={() => { setSearchQuery('Oso'); setIsSearchOpen(false); setActiveView('catalog'); }} className="px-3 py-1 bg-[#F3EFEA] rounded-full text-[10px] font-bold text-[#7C5E47] uppercase">#Oso</button>
+              </div>
             </div>
           </div>
         </div>

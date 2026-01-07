@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+
+# Block access to admin areas if any
+Disallow: /admin
+
+# Allow crawling of main pages
+Allow: /
+Allow: /catalog
+Allow: /about
+Allow: /contact
+
+# Sitemap
+Sitemap: https://dvelis.com/sitemap.xml

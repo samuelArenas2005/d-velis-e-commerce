@@ -11,10 +11,11 @@ interface ProductCardProps {
 const ProductCard: React.FC<ProductCardProps> = ({ product, onAddToCart }) => {
   const handleShare = (e: React.MouseEvent) => {
     e.stopPropagation();
+    const url = `${window.location.origin}?product=${encodeURIComponent(product.id)}`;
     const shareData = {
       title: `D'Velis - ${product.name}`,
       text: `¡Mira esta vela artesanal de D'Velis! ${product.name}: ${product.description}`,
-      url: window.location.href,
+      url,
     };
 
     if (navigator.share) {

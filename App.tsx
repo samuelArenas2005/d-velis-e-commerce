@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { Product, CartItem, Category, AppView, User, Order } from './types';
 import HeaderComp from './components/Header';
 import Cart from './components/Cart';
@@ -46,13 +46,43 @@ const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
-  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  
   const [maybeRLSProfiles, setMaybeRLSProfiles] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
+  
+  // Refs para evitar ejecuciones duplicadas
+  const dataFetchRef = useRef(false);
+  const loadUserRef = useRef<string | null>(null);
+  const initialProductHandledRef = useRef(false);
 
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [activeView]);
+
+  // Manejar callback de OAuth: limpiar URL después del redirect
+  useEffect(() => {
+    const hash = window.location.hash;
+    const searchParams = new URLSearchParams(window.location.search);
+    
+    // Solo limpiar si hay parámetros de OAuth
+    const hasAuthParams = hash && (
+      hash.includes('access_token') || 
+      hash.includes('error') ||
+      searchParams.has('code') ||
+      searchParams.has('access_token')
+    );
+
+    if (hasAuthParams) {
+      // console.log('🔗 OAuth callback detected, cleaning URL...');
+      // Limpiar URL después de que Supabase procese el hash
+      // Usar un delay más largo para asegurar que Supabase lo procese
+      setTimeout(() => {
+        const cleanUrl = window.location.pathname + window.location.search.replace(/[?&](code|access_token|error)=[^&]*/g, '');
+        window.history.replaceState({}, document.title, cleanUrl || '/');
+        // console.log('✅ URL cleaned');
+      }, 500);
+    }
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cartItems));
@@ -60,8 +90,21 @@ const App: React.FC = () => {
 
   // Función para cargar el perfil del usuario desde la sesión
   const loadUserFromSession = async (session: any) => {
+    const userId = session?.user?.id;
+    
+    // Evitar cargar el mismo usuario múltiples veces simultáneamente
+    if (loadUserRef.current === userId) {
+      // console.log('⏭️ Skipping duplicate loadUserFromSession for user:', session.user.email);
+      return;
+    }
+    
+    loadUserRef.current = userId;
+    // console.log('👤 loadUserFromSession called for:', session.user.email);
+    
     if (!session?.user) {
+      // console.warn('⚠️ No user in session');
       setCurrentUser(null);
+      loadUserRef.current = null;
       return;
     }
 
@@ -87,19 +130,37 @@ const App: React.FC = () => {
       let profile = null;
       let profileError = null;
 
-      // Intentar leer el perfil
+      // Intentar leer el perfil con timeout
+      // console.log('📖 Attempting to read profile from database...');
       try {
-        const result = await supabase
+        // Crear una promesa con timeout
+        const profilePromise = supabase
           .from('profiles')
           .select('*')
           .eq('id', session.user.id)
           .single();
         
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Profile fetch timeout after 2 seconds')), 2000)
+        );
+        
+        const result = await Promise.race([profilePromise, timeoutPromise]) as any;
+        
         profile = result.data;
         profileError = result.error;
+        
+        if (profileError) {
+          // console.warn('⚠️ Profile query returned error:', profileError);
+        } else if (profile) {
+          // console.log('✅ Profile loaded from database');
+        }
       } catch (err: any) {
         profileError = err;
-        console.warn('Error reading profile (RLS may be blocking):', err);
+        if (err.message?.includes('timeout')) {
+          // console.warn('⏱️ Profile fetch timed out (RLS may be blocking)');
+        } else {
+          // console.warn('⚠️ Error reading profile (RLS may be blocking):', err);
+        }
       }
 
       // Si hay error pero no es "not found", puede ser RLS
@@ -112,18 +173,11 @@ const App: React.FC = () => {
 
       if (profile) {
         // Perfil encontrado exitosamente
+        // console.log('✅ Profile found, processing...');
         const normalizedRole = typeof profile.role === 'string' 
           ? profile.role.toLowerCase().trim() 
           : String(profile.role || '').toLowerCase().trim();
         const userRole = normalizedRole === 'admin' ? 'admin' : 'customer';
-        
-        /* console.log('Profile loaded successfully:', {
-          id: profile.id,
-          name: profile.full_name,
-          email: session.user.email,
-          rawRole: profile.role,
-          finalRole: userRole
-        }); */
         
         const userData = {
           id: profile.id,
@@ -132,148 +186,169 @@ const App: React.FC = () => {
           role: userRole
         };
         
+        // console.log('✅ Setting currentUser from profile:', { email: userData.email, role: userData.role });
         setCurrentUser(userData);
+        // console.log('✅ loadUserFromSession completed (profile)');
+        loadUserRef.current = null;
         return;
       }
 
       // Si hay error RLS o no se encontró perfil, usar datos de la sesión
-      if (isRLSError || !profile) {
-        console.warn('Cannot access profile (RLS or not found), using session metadata');
-        
-        // Intentar determinar rol desde metadatos de la sesión
-        const userRole = determineRole(
-          undefined, 
-          { ...session.user.user_metadata, ...session.user.app_metadata }
-        );
-
-        const userData = {
-          id: session.user.id,
-          name: session.user.user_metadata?.full_name || 
-                session.user.user_metadata?.name || 
-                session.user.email?.split('@')[0] || 
-                'Usuario',
-          email: session.user.email || '',
-          role: userRole
-        };
-
-        console.log('User set from session (RLS fallback):', userData);
-        setCurrentUser(userData);
-        return;
-      }
-
-      // Si llegamos aquí, intentar crear perfil (aunque probablemente falle por RLS)
-      try {
-        const newProfile = {
-          id: session.user.id,
-          full_name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Cliente D\'Velis',
-          role: 'customer'
-        };
-        
-        const { error: insertError } = await supabase.from('profiles').insert(newProfile);
-        
-        if (!insertError) {
-          setCurrentUser({
-            id: newProfile.id,
-            name: newProfile.full_name,
-            email: session.user.email || '',
-            role: 'customer' as any
-          });
-        } else {
-          throw insertError;
-        }
-      } catch (createError: any) {
-        console.warn('Cannot create profile (RLS blocking), using session data');
-        // Fallback final: usar datos de sesión, intentar obtener rol desde metadatos
-        const userRole = determineRole(
-          undefined,
-          { ...session.user.user_metadata, ...session.user.app_metadata }
-        );
-        
-        setCurrentUser({
-          id: session.user.id,
-          name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Usuario',
-          email: session.user.email || '',
-          role: userRole
-        });
-      }
+      // console.log('⚠️ No profile found, using session metadata as fallback');
       
+      // Intentar determinar rol desde metadatos de la sesión
+      const userRole = determineRole(
+        undefined, 
+        { ...session.user.user_metadata, ...session.user.app_metadata }
+      );
+
+      const userData = {
+        id: session.user.id,
+        name: session.user.user_metadata?.full_name || 
+              session.user.user_metadata?.name || 
+              session.user.email?.split('@')[0] || 
+              'Usuario',
+        email: session.user.email || '',
+        role: userRole
+      };
+
+      // console.log('✅ Setting currentUser from session metadata:', { email: userData.email, role: userData.role });
+      setCurrentUser(userData);
+      // console.log('✅ loadUserFromSession completed (session metadata)');
+      loadUserRef.current = null;
+      return;
+
     } catch (error) {
-      console.error('Unexpected error loading user:', error);
+      // console.error('❌ Unexpected error in loadUserFromSession:', error);
       // Último fallback: usar datos básicos de la sesión
       const userRole = determineRole(
         undefined,
         { ...session.user.user_metadata, ...session.user.app_metadata }
       );
       
-      setCurrentUser({
+      const fallbackUser = {
         id: session.user.id,
         name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Usuario',
         email: session.user.email || '',
-        avatar: session.user.user_metadata?.avatar_url || session.user.user_metadata?.picture,
         role: userRole
-      });
+      };
+      
+      // console.log('✅ Setting currentUser from error fallback:', { email: fallbackUser.email, role: fallbackUser.role });
+      setCurrentUser(fallbackUser);
+      // console.log('✅ loadUserFromSession completed (error fallback)');
+      loadUserRef.current = null;
     }
   };
 
   useEffect(() => {
-    let isMounted = true;
-    let sessionChecked = false;
+    let mounted = true;
+    let hasProcessedInitialSession = false;
 
-    // Load initial data immediately, regardless of auth state
-    if (!isDataLoaded) {
-      setIsDataLoaded(true);
-      fetchInitialData();
-    }
+    // 1️⃣ Leer sesión DIRECTAMENTE desde storage (no depender de eventos)
+    const initAuth = async () => {
+      try {
+        // console.log('🔐 Initializing auth, origin:', window.location.origin);
+        const { data: { session }, error } = await supabase.auth.getSession();
 
-    // Escuchar cambios en el estado de autenticación (incluye sesión inicial)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!isMounted) return;
+        if (!mounted) {
+          // console.log('❌ Component unmounted, aborting');
+          return;
+        }
 
-      console.log('Auth state changed:', event, session?.user?.email);
+        if (error) {
+          // console.error('❌ Error getting session:', error);
+          setCurrentUser(null);
+          setAuthLoading(false);
+          return;
+        }
 
-      // El evento INITIAL_SESSION se dispara automáticamente cuando Supabase inicializa
-      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        sessionChecked = true;
         if (session) {
-          await loadUserFromSession(session);
+          // console.log('✅ Session found on init:', {
+          //   email: session.user.email,
+          //   expiresAt: session.expires_at,
+          //   origin: window.location.origin
+          // });
           
-          // Si es un inicio de sesión nuevo, cerrar el overlay y mostrar mensaje
-          if (event === 'SIGNED_IN') {
-            setIsLoginOpen(false);
-            setToast({ message: '¡Bienvenido! Sesión iniciada correctamente', type: 'success' });
+          hasProcessedInitialSession = true;
+          try {
+            await loadUserFromSession(session);
+          } catch (loadError) {
+            // console.error('❌ Error loading user from session:', loadError);
+            // Continuar aunque falle loadUserFromSession
           }
         } else {
+          // console.log('⚠️ No session found on init, origin:', window.location.origin);
           setCurrentUser(null);
         }
-        setAuthLoading(false);
-      } else if (event === 'SIGNED_OUT') {
+      } catch (err) {
+        // console.error('❌ Unexpected error in initAuth:', err);
         setCurrentUser(null);
-        setToast({ message: 'Sesión cerrada correctamente', type: 'success' });
-        setAuthLoading(false);
+      } finally {
+        if (mounted) {
+          // console.log('✅ Auth loading complete');
+          setAuthLoading(false);
+        } else {
+          // console.log('⚠️ Component unmounted before completing auth');
+        }
+      }
+    };
+
+    // Ejecutar inmediatamente
+    initAuth();
+
+    // Timeout de seguridad: asegurar que authLoading se establezca en false después de 3 segundos máximo
+    const safetyTimeout = setTimeout(() => {
+      if (mounted) {
+        setAuthLoading((prev) => {
+          if (prev) {
+            // console.warn('⚠️ Auth initialization timeout after 3s, forcing authLoading to false');
+          }
+          return false;
+        });
+      }
+    }, 3000);
+
+    // 2️⃣ Escuchar cambios (login/logout reales, no para carga inicial)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return;
+
+      // Ignorar INITIAL_SESSION si ya procesamos la sesión en initAuth
+      if (event === 'INITIAL_SESSION' && hasProcessedInitialSession) {
+        // console.log('⏭️ Skipping INITIAL_SESSION (already processed in initAuth)');
+        return;
+      }
+
+      // console.log('🔔 Auth state changed:', event, session?.user?.email);
+
+      if (session) {
+        // Cualquier evento con sesión (SIGNED_IN, TOKEN_REFRESHED, etc.)
+        try {
+          // console.log('🔄 Loading user from session (onAuthStateChange)...');
+          await loadUserFromSession(session);
+          // console.log('✅ User loaded successfully from onAuthStateChange');
+        } catch (loadError) {
+          // console.error('❌ Error loading user in onAuthStateChange:', loadError);
+          // No bloquear, continuar aunque falle
+        }
+        
+        // Solo mostrar toast en login nuevo
+        if (event === 'SIGNED_IN') {
+          setIsLoginOpen(false);
+          setToast({ message: '¡Bienvenido! Sesión iniciada correctamente', type: 'success' });
+        }
+      } else {
+        // Sin sesión = logout
+        // console.log('🚪 No session, setting user to null');
+        setCurrentUser(null);
+        if (event === 'SIGNED_OUT') {
+          setToast({ message: 'Sesión cerrada correctamente', type: 'success' });
+        }
       }
     });
 
-    // Fallback: Si después de 1 segundo no se ha recibido INITIAL_SESSION, verificar manualmente
-    const timeoutId = setTimeout(async () => {
-      if (!sessionChecked && isMounted) {
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session && isMounted) {
-            await loadUserFromSession(session);
-          } else if (isMounted) {
-            // Data already loaded above
-          }
-        } catch (error) {
-          console.error('Error in fallback session check:', error);
-          // Data loading is handled above, no need to set isLoading here
-        }
-      }
-      setAuthLoading(false);
-    }, 1000);
-
     return () => {
-      isMounted = false;
-      clearTimeout(timeoutId);
+      mounted = false;
+      clearTimeout(safetyTimeout);
       subscription.unsubscribe();
     };
   }, []);
@@ -281,7 +356,7 @@ const App: React.FC = () => {
   async function fetchUsers() {
     const { data: profilesData, error } = await supabase.from('profiles').select('*');
     if (error) {
-      console.warn('Error fetching profiles:', error);
+      // console.warn('Error fetching profiles:', error);
       setUsers([]);
       setMaybeRLSProfiles(true);
       return;
@@ -298,7 +373,7 @@ const App: React.FC = () => {
 
       // If only a single profile (often the current user) is returned, it's likely due to RLS policies.
       if (mapped.length <= 1) {
-        console.warn('Only one or zero profiles returned; this may be caused by Supabase RLS policies.');
+        // console.warn('Only one or zero profiles returned; this may be caused by Supabase RLS policies.');
         setMaybeRLSProfiles(true);
       } else {
         setMaybeRLSProfiles(false);
@@ -307,14 +382,23 @@ const App: React.FC = () => {
   }
 
   async function fetchInitialData() {
+    // console.log('📦 Fetching initial data...');
     setIsLoading(true);
+    
     try {
-      const { data: productsData } = await supabase
+      // Cargar productos
+      // console.log('📦 Loading products...');
+      const { data: productsData, error: productsError } = await supabase
         .from('products')
         .select('*')
         .order('created_at', { ascending: false });
       
-      if (productsData) {
+      if (productsError) {
+        // console.error('❌ Error loading products:', productsError);
+        // Continuar aunque falle, usar array vacío
+        setProducts([]);
+      } else if (productsData) {
+        // console.log(`✅ Loaded ${productsData.length} products`);
         const mappedProducts = productsData.map(p => ({
           ...p,
           isFeatured: p.is_featured,
@@ -327,33 +411,70 @@ const App: React.FC = () => {
           } : undefined
         }));
         setProducts(mappedProducts);
+      } else {
+        // console.warn('⚠️ No products data returned');
+        setProducts([]);
       }
 
-      const { data: ordersData } = await supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false });
-      
-      if (ordersData) {
-        const mappedOrders: Order[] = ordersData.map(o => ({
-          id: o.id,
-          userId: o.user_id,
-          userName: o.user_name || 'Cliente',
-          total: o.total,
-          status: o.status,
-          createdAt: o.created_at,
-          items: []
-        }));
-        setOrders(mappedOrders);
+      // Cargar órdenes (opcional, puede fallar por RLS)
+      try {
+        // console.log('📦 Loading orders...');
+        const { data: ordersData, error: ordersError } = await supabase
+          .from('orders')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        if (ordersError) {
+          // console.warn('⚠️ Error loading orders (may be RLS):', ordersError);
+          setOrders([]);
+        } else if (ordersData) {
+          // console.log(`✅ Loaded ${ordersData.length} orders`);
+          const mappedOrders: Order[] = ordersData.map(o => ({
+            id: o.id,
+            userId: o.user_id,
+            userName: o.user_name || 'Cliente',
+            total: o.total,
+            status: o.status,
+            createdAt: o.created_at,
+            items: []
+          }));
+          setOrders(mappedOrders);
+        } else {
+          setOrders([]);
+        }
+      } catch (ordersErr) {
+        // console.warn('⚠️ Error in orders fetch (non-critical):', ordersErr);
+        setOrders([]);
       }
 
-      await fetchUsers();
+      // Cargar usuarios (opcional, puede fallar por RLS)
+      try {
+        await fetchUsers();
+      } catch (usersErr) {
+        // console.warn('⚠️ Error fetching users (non-critical):', usersErr);
+      }
+
+      // console.log('✅ Initial data fetch complete');
     } catch (error) {
-      console.error('Error loading data:', error);
+      // console.error('❌ Critical error loading data:', error);
+      // Asegurar que al menos productos sea un array vacío
+      setProducts([]);
     } finally {
       setIsLoading(false);
+      // console.log('📦 Data loading finished, isLoading set to false');
     }
   }
+
+  // Load application data once on mount (independent of auth resolution)
+  useEffect(() => {
+    if (dataFetchRef.current) {
+      // console.log('⏭️ Skipping duplicate fetchInitialData call');
+      return;
+    }
+    dataFetchRef.current = true;
+    fetchInitialData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -383,7 +504,7 @@ const App: React.FC = () => {
     const { error } = await supabase.from('products').upsert(payload);
 
     if (error) {
-      console.error('Error Supabase Upsert:', error);
+      // console.error('Error Supabase Upsert:', error);
       showToast(`Error: ${error.message || 'No se pudo guardar'}`, 'error');
     } else {
       showToast(isUUID ? 'Vela actualizada' : 'Vela creada');
@@ -484,8 +605,25 @@ const App: React.FC = () => {
 
   const activeProducts = products.filter(p => p.isActive);
 
+  // Si la URL tiene ?product=ID, abrir directamente la ficha de ese producto al cargar
+  useEffect(() => {
+    if (initialProductHandledRef.current) return;
+    if (!products.length) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const productId = params.get('product');
+    if (!productId) return;
+
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+
+    initialProductHandledRef.current = true;
+    setSelectedProduct(product);
+    setActiveView('product-detail');
+  }, [products]);
+
   const renderSection = () => {
-    if (isLoading || authLoading) return (
+    if (authLoading) return (
       <div className="h-[60vh] flex flex-col items-center justify-center gap-4">
         <Loader2 className="animate-spin text-[#7C5E47]" size={48} />
         <p className="text-[#4A3728] font-medium animate-pulse">Cargando magia de D'Velis...</p>

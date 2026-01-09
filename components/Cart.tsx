@@ -17,12 +17,13 @@ interface CartProps {
 const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQty, onClear }) => {
   const [paymentMethod, setPaymentMethod] = useState<'efectivo' | 'nequi' | 'tarjeta'>('nequi');
   const [paymentPercentage, setPaymentPercentage] = useState<50 | 75 | 100>(50);
-  
+
   // Estado para cupones
   const [couponInput, setCouponInput] = useState('');
-  const [appliedCoupon, setAppliedCoupon] = useState<{code: string, percent: number} | null>(null);
+  const [appliedCoupon, setAppliedCoupon] = useState<{ code: string, percent: number } | null>(null);
   const [couponStatus, setCouponStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [couponMessage, setCouponMessage] = useState('');
+  const [additionalNotes, setAdditionalNotes] = useState('');
 
   // Bloquear el scroll del body cuando el carrito está abierto
   useEffect(() => {
@@ -43,7 +44,7 @@ const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQ
 
   const handleApplyCoupon = async () => {
     if (!couponInput.trim()) return;
-    
+
     setCouponStatus('loading');
     setCouponMessage('');
 
@@ -70,6 +71,7 @@ const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQ
         setCouponInput('');
       }
     } catch (err) {
+      console.error('Error validating coupon:', err);
       setCouponStatus('error');
       setCouponMessage('Error al validar el cupón');
     }
@@ -82,8 +84,8 @@ const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQ
   };
 
   const handleCheckout = () => {
-    const text = `¡Hola D'Velis! 🛍️ Me gustaría hacer un pedido:\n\n` + 
-      items.map(i => `- ${i.name} (${i.selectedColor}, ${i.selectedAroma}) x${i.quantity} ($${(i.finalUnitPrice * i.quantity).toLocaleString('es-CO')})`).join('\n') +
+    const text = `¡Hola D'Velis! 🛍️ Me gustaría hacer un pedido:\n\n` +
+      items.map(i => `- ${i.name} (${i.selectedPresentation}, ${i.selectedColor}, ${i.selectedAroma}) x${i.quantity} ($${(i.finalUnitPrice * i.quantity).toLocaleString('es-CO')})`).join('\n') +
       `\n\n*Subtotal:* $${subtotal.toLocaleString('es-CO')}` +
       (appliedCoupon ? `\n*Cupón aplicado:* ${appliedCoupon.code} (-${appliedCoupon.percent}%)` : '') +
       (appliedCoupon ? `\n*Descuento:* -$${discountAmount.toLocaleString('es-CO')}` : '') +
@@ -91,8 +93,9 @@ const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQ
       `\n\n*Método de Pago:* ${paymentMethod.toUpperCase()}` +
       `\n*Abono Elegido:* ${paymentPercentage}% ($${upfrontPayment.toLocaleString('es-CO')})` +
       `\n\n_Nota: Entiendo que el costo de domicilio varía según mi ubicación._` +
+      (additionalNotes.trim() ? `\n\n*Notas Adicionales:* ${additionalNotes.trim()}` : '') +
       `\n\n¿Podemos coordinar los detalles del envío? ✅`;
-    
+
     window.open(`https://wa.me/${CONTACT_WHATSAPP}?text=${encodeURIComponent(text)}`, '_blank');
   };
 
@@ -101,7 +104,7 @@ const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQ
   return (
     <div className="fixed inset-0 z-[100] overflow-hidden">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      
+
       <div className="absolute right-0 top-0 bottom-0 w-full max-w-md bg-[#FDFBF9] shadow-2xl flex flex-col animate-slide-in-right">
         <div className="p-6 border-b border-[#EADED2] flex justify-between items-center">
           <div className="flex items-center gap-2">
@@ -110,7 +113,7 @@ const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQ
           </div>
           <div className="flex items-center gap-2">
             {items.length > 0 && (
-              <button 
+              <button
                 onClick={onClear}
                 title="Vaciar Bolsa"
                 className="p-2 text-[#A68972] hover:text-red-500 hover:bg-red-50 rounded-full transition-all flex items-center gap-2 text-xs font-bold uppercase tracking-widest"
@@ -135,7 +138,7 @@ const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQ
                 <p className="text-lg font-bold text-[#4A3728]">¡Tu bolsa está esperando!</p>
                 <p className="text-sm text-[#8C7A6B]">Explora nuestro catálogo y elige las velas que iluminarán tu hogar.</p>
               </div>
-              <button 
+              <button
                 onClick={onClose}
                 className="bg-[#7C5E47] text-white px-8 py-3 rounded-full font-bold hover:bg-[#634937] transition-all"
               >
@@ -146,35 +149,35 @@ const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQ
             <div className="space-y-6">
               {items.map((item, idx) => (
                 <div key={`${item.id}-${idx}`} className="flex gap-4 items-center bg-white p-3 rounded-2xl border border-[#F3EFEA] hover:shadow-sm transition-shadow">
-                  <img 
-                    src={item.images[0]} 
-                    alt={item.name} 
-                    className="w-20 h-20 rounded-xl object-cover border border-[#EADED2]" 
+                  <img
+                    src={item.images[0]}
+                    alt={item.name}
+                    className="w-20 h-20 rounded-xl object-cover border border-[#EADED2]"
                   />
                   <div className="flex-1">
                     <h3 className="font-bold text-[#4A3728] leading-tight text-sm">{item.name}</h3>
                     <p className="text-[10px] text-[#8C7A6B] uppercase tracking-wider font-semibold mt-0.5">
-                      {item.selectedColor} • {item.selectedAroma}
+                      {item.selectedPresentation} • {item.selectedColor} • {item.selectedAroma}
                     </p>
                     <p className="text-sm text-[#7C5E47] font-black mt-1">$ {item.finalUnitPrice.toLocaleString('es-CO')}</p>
-                    
+
                     <div className="flex items-center gap-4 mt-2">
                       <div className="flex items-center border border-[#EADED2] rounded-lg overflow-hidden bg-[#FDFBF9]">
-                        <button 
+                        <button
                           onClick={() => onUpdateQty(idx, -1)}
                           className="px-2 py-1 bg-[#F3EFEA] hover:bg-[#EADED2] transition-colors font-bold"
                         >
                           -
                         </button>
                         <span className="px-3 text-xs font-black min-w-[30px] text-center">{item.quantity}</span>
-                        <button 
+                        <button
                           onClick={() => onUpdateQty(idx, 1)}
                           className="px-2 py-1 bg-[#F3EFEA] hover:bg-[#EADED2] transition-colors font-bold"
                         >
                           +
                         </button>
                       </div>
-                      <button 
+                      <button
                         onClick={() => onRemove(idx)}
                         className="text-[#A68972] hover:text-red-500 transition-colors p-1"
                       >
@@ -194,14 +197,14 @@ const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQ
                   {!appliedCoupon ? (
                     <div className="space-y-2">
                       <div className="flex gap-2">
-                        <input 
+                        <input
                           type="text"
                           value={couponInput}
                           onChange={(e) => setCouponInput(e.target.value)}
                           placeholder="Ej: DVELIS10"
                           className="flex-1 px-4 py-2 bg-[#F3EFEA] border border-[#EADED2] rounded-xl text-xs font-bold uppercase tracking-widest outline-none focus:ring-1 focus:ring-[#7C5E47] transition-all"
                         />
-                        <button 
+                        <button
                           onClick={handleApplyCoupon}
                           disabled={couponStatus === 'loading'}
                           className="bg-[#4A3728] text-white px-4 py-2 rounded-xl text-xs font-bold transition-all hover:bg-[#7C5E47] active:scale-95 disabled:opacity-50"
@@ -244,11 +247,10 @@ const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQ
                       <button
                         key={method.id}
                         onClick={() => setPaymentMethod(method.id as any)}
-                        className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${
-                          paymentMethod === method.id 
-                          ? 'border-[#7C5E47] bg-white text-[#7C5E47] shadow-sm' 
+                        className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${paymentMethod === method.id
+                          ? 'border-[#7C5E47] bg-white text-[#7C5E47] shadow-sm'
                           : 'border-[#F3EFEA] text-[#8C7A6B] hover:border-[#EADED2]'
-                        }`}
+                          }`}
                       >
                         {method.icon}
                         <span className="text-[9px] font-black mt-1 uppercase">{method.label}</span>
@@ -264,11 +266,10 @@ const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQ
                       <button
                         key={p}
                         onClick={() => setPaymentPercentage(p as any)}
-                        className={`flex-1 py-2 rounded-xl text-xs font-bold border-2 transition-all ${
-                          paymentPercentage === p 
-                          ? 'border-[#7C5E47] bg-[#7C5E47] text-white shadow-md' 
+                        className={`flex-1 py-2 rounded-xl text-xs font-bold border-2 transition-all ${paymentPercentage === p
+                          ? 'border-[#7C5E47] bg-[#7C5E47] text-white shadow-md'
                           : 'border-[#EADED2] text-[#8C7A6B] hover:border-[#7C5E47]'
-                        }`}
+                          }`}
                       >
                         {p}%
                       </button>
@@ -282,6 +283,16 @@ const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQ
                     <strong className="text-[#4A3728]">Nota:</strong> El costo del envío se calcula por separado según tu ubicación exacta.
                   </p>
                 </div>
+
+                <div>
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-[#4A3728] mb-2">Notas Adicionales</h4>
+                  <textarea
+                    value={additionalNotes}
+                    onChange={(e) => setAdditionalNotes(e.target.value)}
+                    placeholder="Ej: Moño color rojo, entregar en portería, mensaje de regalo..."
+                    className="w-full p-4 bg-[#F3EFEA] border border-[#EADED2] rounded-2xl text-xs outline-none focus:ring-1 focus:ring-[#7C5E47] transition-all resize-none h-24"
+                  />
+                </div>
               </div>
             </div>
           )}
@@ -294,7 +305,7 @@ const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQ
                 <span className="text-xs font-bold uppercase tracking-widest">Valor de la Bolsa</span>
                 <span className="font-bold">${subtotal.toLocaleString('es-CO')}</span>
               </div>
-              
+
               {appliedCoupon && (
                 <div className="flex justify-between items-center text-green-600">
                   <span className="text-xs font-bold uppercase tracking-widest">Descuento ({appliedCoupon.percent}%)</span>
@@ -312,8 +323,8 @@ const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQ
                 <span className="text-2xl font-black">${upfrontPayment.toLocaleString('es-CO')}</span>
               </div>
             </div>
-            
-            <button 
+
+            <button
               onClick={handleCheckout}
               className="w-full bg-[#25D366] hover:bg-[#128C7E] text-white py-4 rounded-2xl font-black flex items-center justify-center gap-3 transition-all transform hover:scale-[1.02] shadow-xl active:scale-95"
             >
@@ -322,8 +333,9 @@ const Cart: React.FC<CartProps> = ({ isOpen, onClose, items, onRemove, onUpdateQ
           </div>
         )}
       </div>
-      
-      <style dangerouslySetInnerHTML={{ __html: `
+
+      <style dangerouslySetInnerHTML={{
+        __html: `
         @keyframes slide-in-right {
           from { transform: translateX(100%); }
           to { transform: translateX(0); }

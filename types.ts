@@ -19,6 +19,16 @@ export interface Product {
   isActive: boolean; // Atributo para activar/desactivar
 }
 
+export interface Coupon {
+  id: string;
+  code: string;
+  discount_percent: number;
+  usage_limit: number;
+  usage_count: number;
+  is_active: boolean;
+  created_at?: string;
+}
+
 export interface User {
   id: string;
   name: string;

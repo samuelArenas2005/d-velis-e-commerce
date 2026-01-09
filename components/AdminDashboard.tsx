@@ -1,18 +1,18 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { 
-  BarChart3, 
-  Package, 
-  Users, 
-  Plus, 
-  Trash2, 
-  Edit3, 
-  CheckCircle2, 
-  Clock, 
-  TrendingUp, 
-  Image as ImageIcon, 
-  X as CloseIcon, 
-  Upload, 
+import {
+  BarChart3,
+  Package,
+  Users,
+  Plus,
+  Trash2,
+  Edit3,
+  CheckCircle2,
+  Clock,
+  TrendingUp,
+  Image as ImageIcon,
+  X as CloseIcon,
+  Upload,
   Loader2,
   AlertTriangle,
   Star,
@@ -34,12 +34,12 @@ import {
   Percent,
   Hash
 } from 'lucide-react';
-import { Product, Order, User, Category } from '../types';
+import { Product, Order, User, Category, Coupon } from '../types';
 import { supabase } from '../supabase';
 
 // Utility function to generate UUID v4
 const generateUUID = (): string => {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
     const r = (crypto.getRandomValues(new Uint8Array(1))[0] / 255) * 16 | 0;
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
@@ -52,12 +52,12 @@ interface AdminDashboardProps {
   users: User[];
   maybeRLSProfiles?: boolean;
   onSaveProduct: (p: Product) => void;
-  onDeleteProduct: (id: string) => void; 
+  onDeleteProduct: (id: string) => void;
   onUpdateOrderStatus: (id: string, status: Order['status']) => void;
   onRefresh?: () => void;
 }
 
-const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
+const AdminDashboard: React.FC<AdminDashboardProps> = ({
   products, orders, users, maybeRLSProfiles, onSaveProduct, onDeleteProduct, onUpdateOrderStatus, onRefresh
 }) => {
   const [activeTab, setActiveTab] = useState<'sales' | 'products' | 'customers' | 'coupons'>('sales');
@@ -67,8 +67,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Estados de cupones
-  const [coupons, setCoupons] = useState<any[]>([]);
-  const [editingCoupon, setEditingCoupon] = useState<any | null>(null);
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [editingCoupon, setEditingCoupon] = useState<Partial<Coupon> | null>(null);
   const [isCouponLoading, setIsCouponLoading] = useState(false);
 
   // Estados de filtros para Ventas
@@ -121,8 +121,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const filteredProducts = useMemo(() => {
     if (!searchProductQuery.trim()) return products;
     const query = searchProductQuery.toLowerCase();
-    return products.filter(p => 
-      p.name.toLowerCase().includes(query) || 
+    return products.filter(p =>
+      p.name.toLowerCase().includes(query) ||
       p.description.toLowerCase().includes(query) ||
       p.category.toLowerCase().includes(query)
     );
@@ -142,24 +142,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (!files || files.length === 0) return;
     setIsUploading(true);
     const uploadedUrls: string[] = [...tempImages];
-    
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const fileExt = file.name.split('.').pop();
       const fileName = `${generateUUID()}.${fileExt}`;
       const filePath = `${fileName}`;
-      
+
       const { error } = await supabase.storage.from('imagenes productos').upload(filePath, file);
-      
+
       if (error) {
         console.error("Error subiendo imagen:", error);
         continue;
       }
-      
+
       const { data: { publicUrl } } = supabase.storage.from('imagenes productos').getPublicUrl(filePath);
       uploadedUrls.push(publicUrl);
     }
-    
+
     setTempImages(uploadedUrls);
     setIsUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -194,14 +194,25 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleSaveCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsCouponLoading(true);
-    const { error } = await supabase.from('coupons').upsert({
-      id: editingCoupon.id,
-      code: editingCoupon.code.toUpperCase(),
+    const couponData: any = {
+      code: editingCoupon.code?.toUpperCase(),
       discount_percent: editingCoupon.discount_percent,
       usage_limit: editingCoupon.usage_limit,
-      is_active: editingCoupon.is_active
-    });
-    
+      is_active: editingCoupon.is_active,
+      usage_count: editingCoupon.usage_count ?? 0
+    };
+
+    if (editingCoupon.id) {
+      couponData.id = editingCoupon.id;
+    }
+
+    const { error } = await supabase.from('coupons').upsert(couponData);
+
+    if (error) {
+      console.error('Error saving coupon:', error);
+      alert('Error al guardar el cupón. Verifica los permisos o la consola.');
+    }
+
     if (!error) {
       fetchCoupons();
       setEditingCoupon(null);
@@ -228,13 +239,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setPresentationString('');
     setKeywordsString('');
     setEditingProduct({
-      id: generateUUID(), 
-      name: '', 
-      description: '', 
-      price: 0, 
-      category: Category.SPECIAL, 
-      images: [], 
-      colors: [], 
+      id: generateUUID(),
+      name: '',
+      description: '',
+      price: 0,
+      category: Category.SPECIAL,
+      images: [],
+      colors: [],
       aromas: [],
       presentationOptions: [],
       keywords: [],
@@ -250,6 +261,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       code: '',
       discount_percent: 10,
       usage_limit: 100,
+      usage_count: 0,
       is_active: true
     });
   };
@@ -269,15 +281,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${
-                activeTab === tab.id ? 'bg-[#7C5E47] text-white shadow-md scale-[1.02]' : 'text-[#8C7A6B] hover:bg-[#F3EFEA]'
-              }`}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeTab === tab.id ? 'bg-[#7C5E47] text-white shadow-md scale-[1.02]' : 'text-[#8C7A6B] hover:bg-[#F3EFEA]'
+                }`}
             >
               {tab.icon} {tab.label}
             </button>
           ))}
           <div className="pt-6">
-            <button 
+            <button
               onClick={handleRefresh}
               className="w-full flex items-center justify-center gap-2 text-xs font-bold text-[#A68972] hover:text-[#7C5E47] py-2 border border-dashed border-[#EADED2] rounded-xl transition-all"
             >
@@ -289,7 +300,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         {/* Contenido principal */}
         <div className="flex-1 space-y-8 animate-fade-in">
-          
+
           {/* SECCIÓN VENTAS */}
           {activeTab === 'sales' && (
             <div className="space-y-8">
@@ -318,7 +329,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#A68972]" size={16} />
-                    <input 
+                    <input
                       type="text"
                       placeholder="Buscar por cliente..."
                       value={searchOrderName}
@@ -327,7 +338,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     />
                   </div>
                   <div>
-                    <select 
+                    <select
                       value={statusFilter}
                       onChange={(e) => setStatusFilter(e.target.value as any)}
                       className="w-full px-4 py-3 bg-white border border-[#EADED2] rounded-xl text-sm outline-none focus:ring-2 focus:ring-[#7C5E47] transition-all appearance-none cursor-pointer"
@@ -338,14 +349,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </select>
                   </div>
                   <div className="flex gap-2">
-                    <input 
+                    <input
                       type="number"
                       placeholder="Min $"
                       value={minPrice}
                       onChange={(e) => setMinPrice(e.target.value === '' ? '' : parseInt(e.target.value))}
                       className="w-1/2 px-4 py-3 bg-white border border-[#EADED2] rounded-xl text-sm outline-none focus:ring-2 focus:ring-[#7C5E47] transition-all"
                     />
-                    <input 
+                    <input
                       type="number"
                       placeholder="Max $"
                       value={maxPrice}
@@ -386,15 +397,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               {new Date(order.createdAt).toLocaleDateString('es-CO')}
                             </td>
                             <td className="p-4">
-                              <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
-                                order.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
-                              }`}>
+                              <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${order.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
+                                }`}>
                                 {order.status === 'pending' ? 'Pendiente' : 'Listo'}
                               </span>
                             </td>
                             <td className="p-4 text-right">
                               {order.status === 'pending' && (
-                                <button 
+                                <button
                                   onClick={() => onUpdateOrderStatus(order.id, 'completed')}
                                   className="bg-[#7C5E47] text-white px-4 py-1.5 rounded-lg text-xs font-bold transition-all hover:bg-[#4A3728]"
                                 >
@@ -427,8 +437,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
               <div className="relative group">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-[#A68972]" size={20} />
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={searchProductQuery}
                   onChange={(e) => setSearchProductQuery(e.target.value)}
                   placeholder="Buscar velas por nombre, categoría o descripción..."
@@ -443,7 +453,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <img src={product.images[0]} className="w-20 h-20 rounded-2xl object-cover" alt="" />
                       {!product.isActive && (
                         <div className="absolute inset-0 bg-black/40 rounded-2xl flex items-center justify-center text-white">
-                           <EyeOff size={16} />
+                          <EyeOff size={16} />
                         </div>
                       )}
                     </div>
@@ -456,11 +466,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <button onClick={() => setEditingProduct(product)} className="p-2.5 text-[#A68972] hover:text-[#7C5E47] bg-white border border-[#F3EFEA] rounded-xl">
                         <Edit3 size={18} />
                       </button>
-                      <button 
-                        onClick={() => onDeleteProduct(product.id)} 
-                        className={`p-2.5 rounded-xl border transition-all ${
-                          product.isActive ? 'text-red-500 border-red-50 hover:bg-red-50' : 'text-green-500 border-green-50 hover:bg-green-50'
-                        }`}
+                      <button
+                        onClick={() => onDeleteProduct(product.id)}
+                        className={`p-2.5 rounded-xl border transition-all ${product.isActive ? 'text-red-500 border-red-50 hover:bg-red-50' : 'text-green-500 border-green-50 hover:bg-green-50'
+                          }`}
                         title={product.isActive ? 'Desactivar' : 'Activar'}
                       >
                         {product.isActive ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -519,11 +528,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               </div>
                             </td>
                             <td className="p-6">
-                              <button 
+                              <button
                                 onClick={() => toggleCouponStatus(coupon)}
-                                className={`flex items-center gap-2 text-[10px] font-black uppercase transition-colors ${
-                                  coupon.is_active ? 'text-green-500' : 'text-red-400'
-                                }`}
+                                className={`flex items-center gap-2 text-[10px] font-black uppercase transition-colors ${coupon.is_active ? 'text-green-500' : 'text-red-400'
+                                  }`}
                               >
                                 {coupon.is_active ? <Eye size={14} /> : <EyeOff size={14} />}
                                 {coupon.is_active ? 'Activo' : 'Inactivo'}
@@ -555,7 +563,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div>
                 <h2 className="text-2xl font-bold text-[#4A3728]">Lista de Clientes</h2>
                 <p className="text-xs font-bold text-[#8C7A6B] uppercase mt-1">{users.length} usuarios registrados</p>
-                
+
               </div>
 
               <div className="bg-white rounded-3xl border border-[#EADED2] overflow-hidden shadow-sm">
@@ -589,9 +597,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               </div>
                             </td>
                             <td className="p-6">
-                              <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
-                                user.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-[#F3EFEA] text-[#8C7A6B]'
-                              }`}>
+                              <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-[#F3EFEA] text-[#8C7A6B]'
+                                }`}>
                                 {user.role === 'admin' ? 'Administrador' : 'Cliente'}
                               </span>
                             </td>
@@ -632,12 +639,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <label className="text-[10px] font-black text-[#8C7A6B] uppercase tracking-widest flex items-center gap-2">
                   <Hash size={12} /> Código del Cupón
                 </label>
-                <input 
-                  required 
+                <input
+                  required
                   placeholder="Ej: NAVIDAD20"
-                  value={editingCoupon.code} 
-                  onChange={e => setEditingCoupon({...editingCoupon, code: e.target.value.toUpperCase()})} 
-                  className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none font-black tracking-widest" 
+                  value={editingCoupon.code}
+                  onChange={e => setEditingCoupon({ ...editingCoupon, code: e.target.value.toUpperCase() })}
+                  className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none font-black tracking-widest"
                 />
               </div>
 
@@ -646,26 +653,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="text-[10px] font-black text-[#8C7A6B] uppercase tracking-widest flex items-center gap-2">
                     <Percent size={12} /> Descuento (%)
                   </label>
-                  <input 
-                    type="number" 
-                    required 
+                  <input
+                    type="number"
+                    required
                     min="1" max="100"
-                    value={editingCoupon.discount_percent} 
-                    onChange={e => setEditingCoupon({...editingCoupon, discount_percent: parseInt(e.target.value) || 0})} 
-                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none font-bold" 
+                    value={editingCoupon.discount_percent}
+                    onChange={e => setEditingCoupon({ ...editingCoupon, discount_percent: parseInt(e.target.value) || 0 })}
+                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none font-bold"
                   />
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-[#8C7A6B] uppercase tracking-widest flex items-center gap-2">
                     <Users size={12} /> Límite de Uso
                   </label>
-                  <input 
-                    type="number" 
-                    required 
+                  <input
+                    type="number"
+                    required
                     min="1"
-                    value={editingCoupon.usage_limit} 
-                    onChange={e => setEditingCoupon({...editingCoupon, usage_limit: parseInt(e.target.value) || 0})} 
-                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none font-bold" 
+                    value={editingCoupon.usage_limit}
+                    onChange={e => setEditingCoupon({ ...editingCoupon, usage_limit: parseInt(e.target.value) || 0 })}
+                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none font-bold"
                   />
                 </div>
               </div>
@@ -704,7 +711,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   {tempImages.map((url, idx) => (
                     <div key={idx} className="relative aspect-square group">
                       <img src={url} className="w-full h-full object-cover rounded-2xl border border-[#EADED2]" alt="" />
-                      <button 
+                      <button
                         type="button"
                         onClick={() => removeImage(idx)}
                         className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
@@ -713,7 +720,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </button>
                     </div>
                   ))}
-                  <button 
+                  <button
                     type="button"
                     onClick={async () => {
                       if (fileInputRef.current) fileInputRef.current.click();
@@ -732,18 +739,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="grid md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <label className="text-xs font-black text-[#8C7A6B] uppercase">Nombre de la Vela</label>
-                  <input 
-                    required 
-                    value={editingProduct.name || ''} 
-                    onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} 
-                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none focus:ring-2 focus:ring-[#7C5E47]" 
+                  <input
+                    required
+                    value={editingProduct.name || ''}
+                    onChange={e => setEditingProduct({ ...editingProduct, name: e.target.value })}
+                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none focus:ring-2 focus:ring-[#7C5E47]"
                   />
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-black text-[#8C7A6B] uppercase">Categoría</label>
-                  <select 
+                  <select
                     value={editingProduct.category}
-                    onChange={e => setEditingProduct({...editingProduct, category: e.target.value})}
+                    onChange={e => setEditingProduct({ ...editingProduct, category: e.target.value })}
                     className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none focus:ring-2 focus:ring-[#7C5E47] bg-white"
                   >
                     {Object.values(Category).filter(c => c !== Category.ALL).map(cat => (
@@ -756,53 +763,53 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="grid md:grid-cols-3 gap-6">
                 <div className="space-y-2">
                   <label className="text-xs font-black text-[#8C7A6B] uppercase">Precio Unitario ($)</label>
-                  <input 
-                    type="number" 
-                    required 
-                    value={editingProduct.price || ''} 
-                    onChange={e => setEditingProduct({...editingProduct, price: parseInt(e.target.value) || 0})} 
-                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none" 
+                  <input
+                    type="number"
+                    required
+                    value={editingProduct.price || ''}
+                    onChange={e => setEditingProduct({ ...editingProduct, price: parseInt(e.target.value) || 0 })}
+                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none"
                   />
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-black text-[#8C7A6B] uppercase">Precio x Mayor ($)</label>
-                  <input 
-                    type="number" 
-                    value={editingProduct.bulkPrice?.price || ''} 
+                  <input
+                    type="number"
+                    value={editingProduct.bulkPrice?.price || ''}
                     onChange={e => setEditingProduct({
-                      ...editingProduct, 
-                      bulkPrice: { 
-                        threshold: editingProduct.bulkPrice?.threshold || 12, 
-                        price: parseInt(e.target.value) || 0 
+                      ...editingProduct,
+                      bulkPrice: {
+                        threshold: editingProduct.bulkPrice?.threshold || 12,
+                        price: parseInt(e.target.value) || 0
                       }
-                    })} 
-                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none" 
+                    })}
+                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none"
                   />
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-black text-[#8C7A6B] uppercase">Mínimo Mayorista (Uds)</label>
-                  <input 
-                    type="number" 
-                    value={editingProduct.bulkPrice?.threshold || ''} 
+                  <input
+                    type="number"
+                    value={editingProduct.bulkPrice?.threshold || ''}
                     onChange={e => setEditingProduct({
-                      ...editingProduct, 
-                      bulkPrice: { 
-                        price: editingProduct.bulkPrice?.price || 0, 
-                        threshold: parseInt(e.target.value) || 12 
+                      ...editingProduct,
+                      bulkPrice: {
+                        price: editingProduct.bulkPrice?.price || 0,
+                        threshold: parseInt(e.target.value) || 12
                       }
-                    })} 
-                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none" 
+                    })}
+                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none"
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
                 <label className="text-xs font-black text-[#8C7A6B] uppercase">Descripción del Producto</label>
-                <textarea 
+                <textarea
                   rows={3}
-                  value={editingProduct.description || ''} 
-                  onChange={e => setEditingProduct({...editingProduct, description: e.target.value})} 
-                  className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none resize-none" 
+                  value={editingProduct.description || ''}
+                  onChange={e => setEditingProduct({ ...editingProduct, description: e.target.value })}
+                  className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none resize-none"
                 />
               </div>
 
@@ -811,10 +818,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="text-xs font-black text-[#8C7A6B] uppercase">Peso (Ej: 150g)</label>
                   <div className="relative">
                     <Weight className="absolute left-4 top-1/2 -translate-y-1/2 text-[#A68972]" size={16} />
-                    <input 
-                      value={editingProduct.weight || ''} 
-                      onChange={e => setEditingProduct({...editingProduct, weight: e.target.value})} 
-                      className="w-full pl-12 pr-4 py-4 rounded-2xl border border-[#EADED2] outline-none" 
+                    <input
+                      value={editingProduct.weight || ''}
+                      onChange={e => setEditingProduct({ ...editingProduct, weight: e.target.value })}
+                      className="w-full pl-12 pr-4 py-4 rounded-2xl border border-[#EADED2] outline-none"
                     />
                   </div>
                 </div>
@@ -822,11 +829,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="text-xs font-black text-[#8C7A6B] uppercase flex items-center gap-2">
                     <Box size={14} /> Presentaciones (Separar por comas)
                   </label>
-                  <input 
-                    value={presentationString} 
-                    onChange={e => setPresentationString(e.target.value)} 
+                  <input
+                    value={presentationString}
+                    onChange={e => setPresentationString(e.target.value)}
                     placeholder="Caja de regalo, Sencillo, Bolsa de yute..."
-                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none" 
+                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none"
                   />
                 </div>
               </div>
@@ -834,20 +841,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="grid md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <label className="text-xs font-black text-[#8C7A6B] uppercase">Colores (Separar por comas)</label>
-                  <input 
-                    value={colorString} 
-                    onChange={e => setColorString(e.target.value)} 
+                  <input
+                    value={colorString}
+                    onChange={e => setColorString(e.target.value)}
                     placeholder="Blanco, Crema, Rosa..."
-                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none" 
+                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none"
                   />
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-black text-[#8C7A6B] uppercase">Aromas (Separar por comas)</label>
-                  <input 
-                    value={aromaString} 
-                    onChange={e => setAromaString(e.target.value)} 
+                  <input
+                    value={aromaString}
+                    onChange={e => setAromaString(e.target.value)}
                     placeholder="Vainilla, Lavanda..."
-                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none" 
+                    className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none"
                   />
                 </div>
               </div>
@@ -856,19 +863,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <label className="text-xs font-black text-[#8C7A6B] uppercase flex items-center gap-2">
                   <Tag size={14} /> Palabras Clave SEO (Separar por comas)
                 </label>
-                <input 
-                  value={keywordsString} 
-                  onChange={e => setKeywordsString(e.target.value)} 
+                <input
+                  value={keywordsString}
+                  onChange={e => setKeywordsString(e.target.value)}
                   placeholder="velas decorativas, recordatorios jamundi, cera de soja..."
-                  className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none" 
+                  className="w-full p-4 rounded-2xl border border-[#EADED2] outline-none"
                 />
               </div>
 
               {/* Toggles */}
               <div className="grid md:grid-cols-2 gap-4">
-                <button 
+                <button
                   type="button"
-                  onClick={() => setEditingProduct({...editingProduct, isFeatured: !editingProduct.isFeatured})}
+                  onClick={() => setEditingProduct({ ...editingProduct, isFeatured: !editingProduct.isFeatured })}
                   className={`flex items-center justify-between p-4 rounded-2xl border transition-all ${editingProduct.isFeatured ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-white border-[#EADED2]'}`}
                 >
                   <div className="flex items-center gap-3">
@@ -880,9 +887,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                 </button>
 
-                <button 
+                <button
                   type="button"
-                  onClick={() => setEditingProduct({...editingProduct, isActive: !editingProduct.isActive})}
+                  onClick={() => setEditingProduct({ ...editingProduct, isActive: !editingProduct.isActive })}
                   className={`flex items-center justify-between p-4 rounded-2xl border transition-all ${editingProduct.isActive !== false ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}
                 >
                   <div className="flex items-center gap-3">
@@ -907,7 +914,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
       )}
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style dangerouslySetInnerHTML={{
+        __html: `
         .custom-scrollbar::-webkit-scrollbar {
           width: 8px;
         }
